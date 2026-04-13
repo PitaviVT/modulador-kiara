@@ -1,4 +1,6 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View,LogBox } from 'react-native';
+
+LogBox.ignoreAllLogs();
 
 export default function HomeScreen() {
   return (

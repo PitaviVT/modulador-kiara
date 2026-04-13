@@ -18,7 +18,10 @@ const MAPPING = {
   'paperplane.fill': 'send',
   'chevron.left.forwardslash.chevron.right': 'code',
   'chevron.right': 'chevron-right',
-  'mic.fill': 'mic'
+  'mic.fill': 'mic',
+  'mic.slash.fill': 'mic-off',      // Estado: Desactivado manual
+  'waveform': 'graphic-eq',          // Estado: Escuchando activamente
+  'pause.circle.fill': 'pause-circle' // Estado: Esperando/Pausado por el navegador
 } as IconMapping;
 
 /**
