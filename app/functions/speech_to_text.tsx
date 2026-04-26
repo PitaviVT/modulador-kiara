@@ -15,12 +15,15 @@ export const useSpeechToText = (onResult: (text: string) => void) => {
   const streamRef = useRef<MediaStream | null>(null);
 
   const stopRecognition = useCallback(() => {
-    setIsActive(false);
     isActiveRef.current = false;
-    
+    setIsActive(false);
+
     if (recognitionRef.current) {
       recognitionRef.current.onend = null;
-      recognitionRef.current.stop();
+      recognitionRef.current.onstart = null;
+      recognitionRef.current.onresult = null;
+      recognitionRef.current.onerror = null;
+      try { recognitionRef.current.stop(); } catch (_) {}
       recognitionRef.current = null;
     }
 
@@ -32,58 +35,61 @@ export const useSpeechToText = (onResult: (text: string) => void) => {
 
   const startRecognition = useCallback(async () => {
     if (!SpeechRecognitionAPI) return alert("Navegador no compatible");
+    if (isActiveRef.current) return;
 
     try {
-      // Forzar permiso en Opera
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
-
-      setTimeout(() => {
-        const recognition = new SpeechRecognitionAPI();
-        recognition.lang = "es-MX";
-        recognition.continuous = true;
-        recognition.interimResults = false;
-
-        recognition.onstart = () => {
-            console.log("Reconocimiento iniciado");
-            setIsActive(true); // Esto debe cambiar el estado
-            isActiveRef.current = true;
-            };
-
-            recognition.onend = () => {
-            console.log("Reconocimiento finalizado");
-            if (isActiveRef.current) {
-                try { 
-                recognition.start(); 
-                } catch (e) {
-                // Si falla al reiniciar, aseguramos que el estado visual sea correcto
-                setIsActive(false);
-                isActiveRef.current = false;
-                }
-            } else {
-                setIsActive(false);
-            }
-        };
-
-        recognition.onresult = (event: any) => {
-          const text = event.results[event.results.length - 1][0].transcript;
-          if (event.results[event.results.length - 1].isFinal) {
-            onResult(text);
-          }
-        };
-
-        recognition.onerror = (event: any) => {
-          console.error("Error Speech:", event.error);
-          if (event.error === 'not-allowed') stopRecognition();
-        };
-        
-        recognitionRef.current = recognition;
-        recognition.start();
-      }, 600);
     } catch (err) {
       console.error("Error acceso micro:", err);
-      setIsActive(false);
+      return;
     }
+
+    isActiveRef.current = true;
+    setIsActive(true);
+
+    // Crea una nueva instancia en cada sesión.
+    // Opera no permite reusar el mismo objeto SpeechRecognition tras onend.
+    const launchSession = () => {
+      if (!isActiveRef.current) return;
+
+      const recognition = new SpeechRecognitionAPI();
+      recognition.lang = "es-MX";
+      recognition.continuous = false; // false es más estable en Opera/Edge
+      recognition.interimResults = false;
+
+      recognition.onresult = (event: any) => {
+        const last = event.results[event.results.length - 1];
+        if (last.isFinal) onResult(last[0].transcript);
+      };
+
+      recognition.onend = () => {
+        // Reiniciar con instancia nueva en lugar de .start() sobre la misma
+        if (isActiveRef.current) {
+          setTimeout(launchSession, 150);
+        } else {
+          setIsActive(false);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error("Error Speech:", event.error);
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          stopRecognition();
+        }
+        // Para el resto (network, no-speech, aborted) onend se encarga del reinicio
+      };
+
+      recognitionRef.current = recognition;
+      try {
+        recognition.start();
+      } catch (e) {
+        console.error("recognition.start() falló:", e);
+        if (isActiveRef.current) setTimeout(launchSession, 500);
+      }
+    };
+
+    launchSession();
   }, [onResult, stopRecognition]);
 
   return { isActive, startRecognition, stopRecognition };
