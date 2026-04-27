@@ -8,29 +8,37 @@ interface IWindow extends Window {
 const { webkitSpeechRecognition, SpeechRecognition } = (typeof window !== 'undefined' ? window : {}) as IWindow;
 const SpeechRecognitionAPI = SpeechRecognition || webkitSpeechRecognition;
 
+const RMS_THRESHOLD = 8;   // ~6% de amplitud — se activa con voz normal
+const ONSET_FRAMES  = 4;   // frames consecutivos antes de lanzar sesión (~66ms a 60fps)
+
 export const useSpeechToText = (onResult: (text: string) => void) => {
   const [isActive, setIsActive] = useState(false);
-  const isActiveRef = useRef(false);
+  const isActiveRef    = useRef(false);
   const recognitionRef = useRef<any>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const streamRef      = useRef<MediaStream | null>(null);
+  const ctxRef         = useRef<AudioContext | null>(null);
+  const recognizingRef = useRef(false);
+  const onResultRef    = useRef(onResult);
+  onResultRef.current  = onResult;
 
   const stopRecognition = useCallback(() => {
-    isActiveRef.current = false;
+    isActiveRef.current    = false;
+    recognizingRef.current = false;
     setIsActive(false);
 
     if (recognitionRef.current) {
-      recognitionRef.current.onend = null;
-      recognitionRef.current.onstart = null;
+      recognitionRef.current.onend    = null;
       recognitionRef.current.onresult = null;
-      recognitionRef.current.onerror = null;
+      recognitionRef.current.onerror  = null;
       try { recognitionRef.current.stop(); } catch (_) {}
       recognitionRef.current = null;
     }
 
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
+    ctxRef.current?.close();
+    ctxRef.current = null;
+
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
   }, []);
 
   const startRecognition = useCallback(async () => {
@@ -48,49 +56,76 @@ export const useSpeechToText = (onResult: (text: string) => void) => {
     isActiveRef.current = true;
     setIsActive(true);
 
-    // Crea una nueva instancia en cada sesión.
-    // Opera no permite reusar el mismo objeto SpeechRecognition tras onend.
+    // VAD: mide RMS del micrófono, solo abre sesión cuando hay voz real
+    const ctx      = new AudioContext();
+    ctxRef.current = ctx;
+    const source   = ctx.createMediaStreamSource(streamRef.current!);
+    const analyser = ctx.createAnalyser();
+    analyser.fftSize = 512;
+    source.connect(analyser);
+    const data     = new Uint8Array(analyser.frequencyBinCount);
+    let onsetCount = 0;
+
     const launchSession = () => {
-      if (!isActiveRef.current) return;
+      if (!isActiveRef.current || recognizingRef.current) return;
+      recognizingRef.current = true;
+      console.log('[STT] sesión iniciada');
 
       const recognition = new SpeechRecognitionAPI();
-      recognition.lang = "es-MX";
-      recognition.continuous = false; // false es más estable en Opera/Edge
+      recognition.lang           = "es-MX";
+      recognition.continuous     = false;
       recognition.interimResults = false;
 
       recognition.onresult = (event: any) => {
-        const last = event.results[event.results.length - 1];
-        if (last.isFinal) onResult(last[0].transcript);
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          if (event.results[i].isFinal) {
+            console.log('[STT] resultado:', event.results[i][0].transcript);
+            onResultRef.current(event.results[i][0].transcript);
+            try { recognition.stop(); } catch (_) {}
+          }
+        }
       };
 
       recognition.onend = () => {
-        // Reiniciar con instancia nueva en lugar de .start() sobre la misma
-        if (isActiveRef.current) {
-          setTimeout(launchSession, 150);
-        } else {
-          setIsActive(false);
-        }
+        console.log('[STT] sesión terminada — esperando VAD');
+        recognizingRef.current = false;
       };
 
       recognition.onerror = (event: any) => {
-        console.error("Error Speech:", event.error);
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
           stopRecognition();
         }
-        // Para el resto (network, no-speech, aborted) onend se encarga del reinicio
+        // network/no-speech: onend resetea recognizingRef, VAD reintenta al hablar
       };
 
       recognitionRef.current = recognition;
       try {
         recognition.start();
       } catch (e) {
-        console.error("recognition.start() falló:", e);
-        if (isActiveRef.current) setTimeout(launchSession, 500);
+        console.error('[STT] start() falló:', e);
+        recognizingRef.current = false;
       }
     };
 
-    launchSession();
-  }, [onResult, stopRecognition]);
+    const tick = () => {
+      if (!isActiveRef.current) { ctx.close(); return; }
+      analyser.getByteTimeDomainData(data);
+      const rms = Math.sqrt(data.reduce((s, v) => s + (v - 128) ** 2, 0) / data.length);
+
+      if (rms > RMS_THRESHOLD) {
+        onsetCount++;
+        if (onsetCount >= ONSET_FRAMES) {
+          onsetCount = 0;
+          launchSession();
+        }
+      } else {
+        onsetCount = 0;
+      }
+      requestAnimationFrame(tick);
+    };
+    tick();
+
+  }, [stopRecognition]);
 
   return { isActive, startRecognition, stopRecognition };
 };

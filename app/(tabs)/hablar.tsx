@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Alert, ActivityIndicator, Animated, Easing, Image } from 'react-native';
+import { StyleSheet, Text, View, TouchableOpacity, ScrollView, TextInput, Alert, ActivityIndicator, Animated, Easing, Image, Modal } from 'react-native';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { useTextToSpeech } from '../functions/text_to_speech';
 import { useSpeechToText } from '../functions/speech_to_text';
@@ -15,6 +15,7 @@ export default function HablarScreen() {
   const [showVoicePicker, setShowVoicePicker] = useState(false);
   const [voiceSearch, setVoiceSearch]     = useState('');
   const [sttMode, setSttMode]             = useState<STTMode>('google');
+  const [chromaMode, setChromaMode]       = useState(false);
 
   const sttModeRef = useRef<STTMode>('google');
   useEffect(() => { sttModeRef.current = sttMode; }, [sttMode]);
@@ -151,9 +152,18 @@ export default function HablarScreen() {
   };
 
   return (
+    <>
     <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.headerTitle}>KIARA CONTROL</Text>
       <Text style={styles.headerSubtitle}>Hybrid Voice System</Text>
+
+      <TouchableOpacity
+        style={styles.chromaEntryBtn}
+        onPress={() => setChromaMode(true)}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.chromaEntryText}>CROMA</Text>
+      </TouchableOpacity>
 
       {/* Discord mode */}
       <View style={styles.modeCard}>
@@ -312,6 +322,50 @@ export default function HablarScreen() {
         <Text style={styles.transcriptText}>{transcript || '...'}</Text>
       </View>
     </ScrollView>
+
+    <Modal visible={chromaMode} animationType="fade" transparent={false}>
+      <View style={styles.chromaOverlay}>
+        <Text style={styles.chromaText}>{transcript}</Text>
+        <View style={styles.chromaControls}>
+          <TouchableOpacity
+            style={[styles.chromaCtrlBtn, useDiscord && styles.chromaCtrlBtnDiscord]}
+            onPress={toggleDiscordMode}
+            disabled={isCheckingBot}
+            activeOpacity={0.6}
+          >
+            {isCheckingBot ? (
+              <ActivityIndicator color="#000" size="small" />
+            ) : (
+              <Image
+                source={{ uri: DISCORD_LOGO }}
+                style={styles.chromaCtrlIcon}
+                tintColor={useDiscord ? undefined : 'rgba(0,0,0,0.5)'}
+              />
+            )}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.chromaCtrlBtn, isActive && styles.chromaCtrlBtnMic]}
+            onPress={handleToggleMic}
+            disabled={isSending || isCheckingBot}
+            activeOpacity={0.6}
+          >
+            <IconSymbol
+              size={20}
+              name={isActive ? 'waveform' : 'mic.fill'}
+              color={isActive ? '#fff' : 'rgba(0,0,0,0.6)'}
+            />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.chromaCtrlBtn}
+            onPress={() => setChromaMode(false)}
+            activeOpacity={0.6}
+          >
+            <Text style={styles.chromaCtrlClose}>✕</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+    </>
   );
 }
 
@@ -369,4 +423,15 @@ const styles = StyleSheet.create({
   voiceBadge:       { backgroundColor: '#F1F2F6', borderRadius: 8, paddingHorizontal: 8, paddingVertical: 3 },
   voiceBadgeText:   { fontSize: 10, color: '#636E72', fontWeight: '700' },
   voiceSearchInput: { marginHorizontal: 12, marginVertical: 8, paddingHorizontal: 14, paddingVertical: 8, backgroundColor: '#F8F9FD', borderRadius: 12, fontSize: 13, color: '#2D3436', borderWidth: 1, borderColor: '#F1F2F6' },
+
+  chromaEntryBtn:       { backgroundColor: '#00FF00', paddingHorizontal: 18, paddingVertical: 8, borderRadius: 20, marginBottom: 24 },
+  chromaEntryText:      { fontSize: 11, fontWeight: '900', color: '#000', letterSpacing: 1.5 },
+  chromaOverlay:        { flex: 1, backgroundColor: '#00FF00', justifyContent: 'center', alignItems: 'center', padding: 40 },
+  chromaText:           { fontSize: 64, fontWeight: '900', color: '#000', textAlign: 'center', lineHeight: 80 },
+  chromaControls:       { position: 'absolute', top: 20, right: 20, flexDirection: 'row', gap: 10 },
+  chromaCtrlBtn:        { width: 40, height: 40, borderRadius: 20, backgroundColor: 'rgba(0,0,0,0.2)', justifyContent: 'center', alignItems: 'center' },
+  chromaCtrlBtnDiscord: { backgroundColor: 'rgba(88,101,242,0.75)' },
+  chromaCtrlBtnMic:     { backgroundColor: 'rgba(46,213,115,0.75)' },
+  chromaCtrlIcon:       { width: 22, height: 22, resizeMode: 'contain' },
+  chromaCtrlClose:      { fontSize: 18, color: '#000', fontWeight: 'bold', lineHeight: 22 },
 });
